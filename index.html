@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   SensorPush Radio Setup · Heat Safety Monitor companion page
-  Version 1.0 · 2026-11-12 · for Heat Safety Monitor 1.9.0 or later
+  Version 1.1 · 2026-11-12 · for Heat Safety Monitor 1.9.0 or later
+  Changes 1.1: name filter box ("Sensor name starts with", saved on the device) so the Bluetooth list shows only matching
+  sensors; the list no longer adds devices by service alone; "show every device" link marked as a long list.
+  1.0: first version.
   Sets the transmit (TX) power of SensorPush HT.w / HTP.xw sensors over Bluetooth, from the phone or laptop of the
   technician who holds the sensor (Web Bluetooth: Chrome or Edge on Android, Windows or Mac; not iPhone or iPad).
   It must open as its own page (GitHub Pages, a web server, or a file on a laptop): inside Apps Script or Google Sites
@@ -63,7 +66,7 @@
     <h2>How to use it</h2>
     <ol>
       <li>Put the <b>new battery</b> in the sensor first. Stand next to it (closer than 30 ft).</li>
-      <li>Press <b>Connect a sensor</b> and pick the one named "SensorPush…" in the list.</li>
+      <li>Press <b>Connect a sensor</b>. The list shows only names that start with the text in the <b>Sensor name starts with</b> box. To make the list shorter, type more of the name, exactly as nRF Connect shows it.</li>
       <li>Press <b>Blink LED</b>: the sensor in your hand flashes. If another one flashes, disconnect and pick the next name.</li>
       <li>Press <b>Set to +5 dBm</b>. The page writes it, reads it back and shows <b>Confirmed</b>.</li>
       <li>Press <b>Disconnect</b> and go to the next sensor. At the end, press <b>Copy results</b> and paste them in the Heat Safety Monitor (Battery tab).</li>
@@ -74,9 +77,12 @@
 
   <section class="card">
     <h2>Sensor</h2>
+    <label for="nameFilter">Sensor name starts with (upper and lower case matter)</label>
+    <input id="nameFilter" type="text" value="SensorPush" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="29">
+    <p class="small muted">Only Bluetooth devices whose name starts with this text show in the list. Leave "SensorPush" to see every SensorPush sensor nearby.</p>
     <div class="row">
       <button type="button" class="btn btn-primary" id="btnConnect">Connect a sensor</button>
-      <button type="button" class="linkbtn" id="btnConnectAll">Can't find it? Show all Bluetooth devices</button>
+      <button type="button" class="linkbtn" id="btnConnectAll">Still not found? Show every Bluetooth device (long list)</button>
     </div>
     <div id="status" class="note info" hidden></div>
     <div id="sensor" hidden>
@@ -116,7 +122,7 @@
     <label for="copyBox">Results text (if Copy does not work, select it and copy by hand)</label>
     <textarea id="copyBox" readonly></textarea>
   </section>
-  <p class="small muted">SensorPush Radio Setup 1.0 · writes only TX power and LED blink · protocol: sensorpush.com/bluetooth-api</p>
+  <p class="small muted">SensorPush Radio Setup 1.1 · writes only TX power and LED blink · protocol: sensorpush.com/bluetooth-api</p>
 </main>
 <script>
 (function () {
@@ -125,7 +131,8 @@
   function C(n) { return 'ef09' + n + '-11d6-42ba-93b8-9dd7ec090aa9'; }
   var CH = { id: C('0001'), ver: C('0002'), tx: C('0003'), bat: C('0007'), led: C('000c'), mac: C('000d') };
   var ALLOWED = [0, 1, 2, 3, 4, 5];
-  var KEY_LOG = 'spRadioLog', KEY_URL = 'spRadioHsmUrl';
+  var KEY_LOG = 'spRadioLog', KEY_URL = 'spRadioHsmUrl', KEY_NAME = 'spRadioName';
+  function namePrefix() { var v = ($('nameFilter').value || '').trim(); return v || 'SensorPush'; }
   var dev = null, svc = null, info = null, busy = false, SUPPORTED = true;
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -183,7 +190,7 @@
     setBusy(true); status('Choose the sensor in the list the browser opens…');
     try {
       dev = await navigator.bluetooth.requestDevice(all ? { acceptAllDevices: true, optionalServices: [SVC] } :
-        { filters: [{ namePrefix: 'SensorPush' }, { services: [SVC] }], optionalServices: [SVC] });
+        { filters: [{ namePrefix: namePrefix() }], optionalServices: [SVC] });
       dev.addEventListener('gattserverdisconnected', function () { svc = null; status('Disconnected from ' + esc(dev && dev.name) + '.', 'info'); setBusy(false); });
       status('Connecting to ' + esc(dev.name || 'the sensor') + '…');
       var server = await dev.gatt.connect();
@@ -193,7 +200,8 @@
       show();
       status('Connected to <b>' + esc(info.name) + '</b>. Press Blink LED to check it is the one in your hand.', 'ok');
     } catch (e) {
-      if (e && e.name === 'NotFoundError') status('No sensor chosen. Stand closer, check the battery is in, and try again. You can also use "Show all Bluetooth devices".', 'warn');
+      if (e && e.name === 'NotFoundError') status('No sensor chosen. Stand closer, check the battery is in and that the name box matches the start of the sensor name (upper and lower case matter), then try again.', 'warn');
+      else if (e && e.name === 'TypeError') status('The name box is not valid. Type the start of the sensor name, for example SensorPush.', 'bad');
       else if (e && e.name === 'SecurityError') status('The browser blocked Bluetooth here. Open this page directly (not inside another page) from an https:// link.', 'bad');
       else status('Could not connect: ' + esc(e && e.message || e) + ' Move closer and try again.', 'bad');
       if (dev && dev.gatt && dev.gatt.connected) dev.gatt.disconnect();
@@ -277,6 +285,8 @@
   $('btnCopy').addEventListener('click', copy);
   $('btnClear').addEventListener('click', function () { if (!log.length) return; log = []; save(KEY_LOG, log); drawLog(); status('List cleared.', 'info'); });
   $('hsmUrl').value = load(KEY_URL, '') || '';
+  $('nameFilter').value = load(KEY_NAME, '') || 'SensorPush';
+  $('nameFilter').addEventListener('input', function () { save(KEY_NAME, ($('nameFilter').value || '').trim()); });
   $('hsmUrl').addEventListener('input', hsmLink);
   $('lnkHsm').addEventListener('click', function (ev) { if ($('lnkHsm').getAttribute('href') === '#') { ev.preventDefault(); status('Paste the Heat Safety Monitor link of this plant in the box first.', 'warn'); } });
   setBusy(false); checkSupport(); drawLog(); hsmLink(); show();
