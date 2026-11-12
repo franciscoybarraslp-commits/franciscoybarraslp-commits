@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<!--
+  SensorPush Radio Setup · Heat Safety Monitor companion page
+  Version 1.0 · 2026-11-12 · for Heat Safety Monitor 1.9.0 or later
+  Sets the transmit (TX) power of SensorPush HT.w / HTP.xw sensors over Bluetooth, from the phone or laptop of the
+  technician who holds the sensor (Web Bluetooth: Chrome or Edge on Android, Windows or Mac; not iPhone or iPad).
+  It must open as its own page (GitHub Pages, a web server, or a file on a laptop): inside Apps Script or Google Sites
+  the browser blocks Bluetooth.
+  Protocol: SensorPush "Bluetooth Protocol for 2nd Generation Sensor Devices" (sensorpush.com/bluetooth-api):
+  service EF090000-...-0AB0; Tx Power EF090003-...-0AA9, 1 byte, valid -21 ... 5 dBm (this page only offers 0 ... 5).
+  The page writes ONLY the Tx Power and the LED blink; it never writes the device ID or the advertising interval.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SensorPush Radio Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --dark: #253442; --text: #1E3446; --muted: #4E6B7C; --line: #D4DEE4; --bg: #F4F7F9; --surface: #FFFFFF;
+    --cta: #82E600; --cta-ink: #1E3446; --ok: #1B6E3C; --ok-bg: #E3F4E8; --warn: #7A5200; --warn-bg: #FFF4D6; --bad: #A4161A; --bad-bg: #FCE8E8; --info: #1F4E79; --info-bg: #E6F0F8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: Montserrat, Arial, sans-serif; font-size: 16px; line-height: 1.5; }
+  header { background: var(--dark); color: #FFFFFF; padding: 16px; }
+  header .kicker { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; font-weight: 600; }
+  header h1 { margin: 4px 0 0; font-size: 24px; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 0 0 16px; }
+  h2 { font-size: 18px; margin: 0 0 8px; }
+  p { margin: 0 0 8px; }
+  .small { font-size: 12px; } .muted { color: var(--muted); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 8px 16px; border-radius: 8px; border: 2px solid var(--dark);
+    background: var(--surface); color: var(--dark); font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--cta); border-color: var(--cta); color: var(--cta-ink); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+  .note { border-radius: 8px; padding: 12px; margin: 8px 0; font-size: 14px; }
+  .note.ok { background: var(--ok-bg); color: var(--ok); } .note.warn { background: var(--warn-bg); color: var(--warn); }
+  .note.bad { background: var(--bad-bg); color: var(--bad); } .note.info { background: var(--info-bg); color: var(--info); }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin: 8px 0; }
+  .fact { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .fact b { display: block; font-size: 20px; } .fact span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 8px 0 4px; }
+  input, select, textarea { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--surface); color: var(--text); }
+  textarea { min-height: 120px; font-size: 12px; font-family: monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; color: var(--muted); }
+  .tag { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .tag.ok { background: var(--ok-bg); color: var(--ok); } .tag.bad { background: var(--bad-bg); color: var(--bad); } .tag.warn { background: var(--warn-bg); color: var(--warn); }
+  ol { padding-left: 20px; margin: 0; } li { margin: 4px 0; }
+  .linkbtn { background: none; border: 0; padding: 0; color: var(--info); font: inherit; text-decoration: underline; cursor: pointer; min-height: 32px; }
+  @media (max-width: 480px) { table { font-size: 12px; } .btn { width: 100%; } }
+</style>
+</head>
+<body>
+<header><div class="kicker">Heat Safety Monitor · SensorPush</div><h1>SensorPush Radio Setup</h1></header>
+<main>
+  <div id="support"></div>
+
+  <section class="card">
+    <h2>How to use it</h2>
+    <ol>
+      <li>Put the <b>new battery</b> in the sensor first. Stand next to it (closer than 30 ft).</li>
+      <li>Press <b>Connect a sensor</b> and pick the one named "SensorPush…" in the list.</li>
+      <li>Press <b>Blink LED</b>: the sensor in your hand flashes. If another one flashes, disconnect and pick the next name.</li>
+      <li>Press <b>Set to +5 dBm</b>. The page writes it, reads it back and shows <b>Confirmed</b>.</li>
+      <li>Press <b>Disconnect</b> and go to the next sensor. At the end, press <b>Copy results</b> and paste them in the Heat Safety Monitor (Battery tab).</li>
+    </ol>
+    <div class="note info"><b>First sensor only: check that the setting stays.</b> After Confirmed, take the battery out for 10 seconds, put it back, connect again and look at "TX power now". If it went back to the old value, tell the HSE team before doing more sensors.</div>
+    <p class="small muted">SensorPush: more power = more range, at the cost of battery life; they suggest +5 dBm for signal problems and say the battery still lasts over two years in typical use.</p>
+  </section>
+
+  <section class="card">
+    <h2>Sensor</h2>
+    <div class="row">
+      <button type="button" class="btn btn-primary" id="btnConnect">Connect a sensor</button>
+      <button type="button" class="linkbtn" id="btnConnectAll">Can't find it? Show all Bluetooth devices</button>
+    </div>
+    <div id="status" class="note info" hidden></div>
+    <div id="sensor" hidden>
+      <div class="facts">
+        <div class="fact"><span>Name</span><b id="fName">—</b></div>
+        <div class="fact"><span>TX power now</span><b id="fTx">—</b></div>
+        <div class="fact"><span>Battery</span><b id="fBat">—</b></div>
+        <div class="fact"><span>Device ID</span><b id="fId">—</b></div>
+        <div class="fact"><span>MAC address</span><b id="fMac" style="font-size: 16px;">—</b></div>
+        <div class="fact"><span>Model</span><b id="fModel">—</b></div>
+      </div>
+      <div class="row">
+        <button type="button" class="btn" id="btnBlink">Blink LED</button>
+        <button type="button" class="btn btn-primary" id="btnSet">Set to +5 dBm</button>
+        <button type="button" class="btn" id="btnRead">Read again</button>
+        <button type="button" class="btn" id="btnDisc">Disconnect</button>
+      </div>
+      <label for="txValue">Power to set (advanced)</label>
+      <select id="txValue">
+        <option value="5" selected>+5 dBm (maximum, recommended)</option>
+        <option value="4">+4 dBm</option><option value="3">+3 dBm</option><option value="2">+2 dBm</option>
+        <option value="1">+1 dBm</option><option value="0">0 dBm</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Results of this session</h2>
+    <div id="log"><p class="muted">No sensor set yet.</p></div>
+    <div class="row">
+      <button type="button" class="btn" id="btnCopy" disabled>Copy results</button>
+      <a class="btn" id="lnkHsm" href="#" target="_blank" rel="noopener">Open Heat Safety Monitor</a>
+      <button type="button" class="linkbtn" id="btnClear">Clear the list</button>
+    </div>
+    <label for="hsmUrl">Heat Safety Monitor link of this plant (saved on this device)</label>
+    <input id="hsmUrl" type="url" placeholder="https://script.google.com/…/exec">
+    <label for="copyBox">Results text (if Copy does not work, select it and copy by hand)</label>
+    <textarea id="copyBox" readonly></textarea>
+  </section>
+  <p class="small muted">SensorPush Radio Setup 1.0 · writes only TX power and LED blink · protocol: sensorpush.com/bluetooth-api</p>
+</main>
+<script>
+(function () {
+  'use strict';
+  var SVC = 'ef090000-11d6-42ba-93b8-9dd7ec090ab0';
+  function C(n) { return 'ef09' + n + '-11d6-42ba-93b8-9dd7ec090aa9'; }
+  var CH = { id: C('0001'), ver: C('0002'), tx: C('0003'), bat: C('0007'), led: C('000c'), mac: C('000d') };
+  var ALLOWED = [0, 1, 2, 3, 4, 5];
+  var KEY_LOG = 'spRadioLog', KEY_URL = 'spRadioHsmUrl';
+  var dev = null, svc = null, info = null, busy = false, SUPPORTED = true;
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function load(k, d) { try { var v = window.localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  function save(k, v) { try { window.localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked: the list lives until the page closes */ } }
+  var log = load(KEY_LOG, []);
+
+  function status(text, kind) { var s = $('status'); s.hidden = !text; s.className = 'note ' + (kind || 'info'); s.innerHTML = text || ''; }
+  function setBusy(b) { busy = b; ['btnConnect', 'btnBlink', 'btnSet', 'btnRead', 'btnDisc'].forEach(function (id) { $(id).disabled = b || (id !== 'btnConnect' && !svc) || (id === 'btnConnect' && !SUPPORTED); }); }
+
+  // ---- can this browser do it? ----
+  function checkSupport() {
+    var msgs = [];
+    var inFrame = false;
+    try { inFrame = window.top !== window.self; } catch (e) { inFrame = true; }
+    if (inFrame) msgs.push(['bad', 'This page is inside another page (for example Google Sites or Apps Script), where browsers block Bluetooth. Open its own link directly.']);
+    if (!window.isSecureContext) msgs.push(['bad', 'This page must open from an https:// address (or as a file on a laptop). Bluetooth is blocked here.']);
+    if (!navigator.bluetooth) msgs.push(['bad', 'This browser cannot use Bluetooth from a web page. Use Chrome or Edge on an Android phone, a Windows PC or a Mac. iPhone and iPad do not support it.']);
+    $('support').innerHTML = msgs.map(function (m) { return '<div class="note ' + m[0] + '">' + esc(m[1]) + '</div>'; }).join('');
+    SUPPORTED = !msgs.length;
+    $('btnConnect').disabled = !SUPPORTED; $('btnConnectAll').disabled = !SUPPORTED;
+    if (!msgs.length && navigator.bluetooth.getAvailability) {
+      navigator.bluetooth.getAvailability().then(function (ok) {
+        if (!ok) $('support').innerHTML = '<div class="note warn">Bluetooth looks switched off on this device. Turn it on (and on Android allow Location/Nearby devices for the browser).</div>';
+      }).catch(function () {});
+    }
+  }
+
+  // ---- read everything ----
+  function hex(dv) { var a = []; for (var i = 0; i < dv.byteLength; i++) a.push(('0' + dv.getUint8(i).toString(16)).slice(-2).toUpperCase()); return a; }
+  async function readAll() {
+    var out = { name: dev.name || '(no name)' };
+    var vId = await (await svc.getCharacteristic(CH.id)).readValue();
+    out.deviceId = String(vId.getUint32(0, true));
+    try { var vVer = await (await svc.getCharacteristic(CH.ver)).readValue(); out.model = vVer.getUint8(0); } catch (e) { out.model = null; }
+    var vTx = await (await svc.getCharacteristic(CH.tx)).readValue();
+    out.tx = vTx.getInt8(0);
+    try { var vB = await (await svc.getCharacteristic(CH.bat)).readValue(); out.mv = vB.getInt16(0, true); } catch (e) { out.mv = null; }
+    try { var vM = await (await svc.getCharacteristic(CH.mac)).readValue(); out.mac = hex(vM).join(':'); } catch (e) { out.mac = ''; }
+    return out;
+  }
+  function show() {
+    $('sensor').hidden = !info;
+    if (!info) return;
+    $('fName').textContent = info.name;
+    $('fTx').textContent = (info.tx > 0 ? '+' : '') + info.tx + ' dBm';
+    $('fBat').innerHTML = info.mv == null ? '—' : esc((info.mv / 1000).toFixed(2) + ' V') + (info.mv < 2900 ? ' <span class="tag warn">not a new battery?</span>' : '');
+    $('fId').textContent = info.deviceId;
+    $('fMac').textContent = info.mac || '—';
+    $('fModel').textContent = info.model == null ? '—' : 'ID ' + info.model;
+  }
+
+  async function connect(all) {
+    if (busy) return;
+    setBusy(true); status('Choose the sensor in the list the browser opens…');
+    try {
+      dev = await navigator.bluetooth.requestDevice(all ? { acceptAllDevices: true, optionalServices: [SVC] } :
+        { filters: [{ namePrefix: 'SensorPush' }, { services: [SVC] }], optionalServices: [SVC] });
+      dev.addEventListener('gattserverdisconnected', function () { svc = null; status('Disconnected from ' + esc(dev && dev.name) + '.', 'info'); setBusy(false); });
+      status('Connecting to ' + esc(dev.name || 'the sensor') + '…');
+      var server = await dev.gatt.connect();
+      try { svc = await server.getPrimaryService(SVC); }
+      catch (e) { throw new Error('This device is not a 2nd-generation SensorPush sensor (HT.w / HTP.xw), or it is a different device.'); }
+      info = await readAll();
+      show();
+      status('Connected to <b>' + esc(info.name) + '</b>. Press Blink LED to check it is the one in your hand.', 'ok');
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') status('No sensor chosen. Stand closer, check the battery is in, and try again. You can also use "Show all Bluetooth devices".', 'warn');
+      else if (e && e.name === 'SecurityError') status('The browser blocked Bluetooth here. Open this page directly (not inside another page) from an https:// link.', 'bad');
+      else status('Could not connect: ' + esc(e && e.message || e) + ' Move closer and try again.', 'bad');
+      if (dev && dev.gatt && dev.gatt.connected) dev.gatt.disconnect();
+      svc = null;
+    }
+    setBusy(false);
+  }
+
+  async function blink() {
+    if (!svc || busy) return;
+    setBusy(true);
+    try { await (await svc.getCharacteristic(CH.led)).writeValue(Uint8Array.of(5)); status('The sensor should blink 5 times now. If a different one blinks, press Disconnect and connect again.', 'info'); }
+    catch (e) { status('Could not blink the LED: ' + esc(e.message || e), 'warn'); }
+    setBusy(false);
+  }
+
+  async function setTx() {
+    if (!svc || busy) return;
+    var want = parseInt($('txValue').value, 10);
+    if (ALLOWED.indexOf(want) < 0) { status('That value is not allowed.', 'bad'); return; }
+    setBusy(true); status('Writing ' + want + ' dBm…');
+    var before = info ? info.tx : null, ok = false, err = '';
+    try {
+      var ch = await svc.getCharacteristic(CH.tx);
+      var bytes = Uint8Array.of(want & 0xFF);
+      if (ch.writeValueWithResponse) await ch.writeValueWithResponse(bytes); else await ch.writeValue(bytes);
+      var back = (await ch.readValue()).getInt8(0);
+      info = await readAll(); show();
+      ok = back === want;
+      status(ok ? '<b>Confirmed:</b> TX power is now ' + (want > 0 ? '+' : '') + want + ' dBm.' : 'The sensor answered ' + back + ' dBm instead of ' + want + ' dBm. Try again; if it repeats, note it and skip this sensor.', ok ? 'ok' : 'bad');
+    } catch (e) {
+      err = String(e && e.message || e);
+      status('Could not write: ' + esc(err) + ' Move closer and press Set again.', 'bad');
+    }
+    log.unshift({ t: new Date().toISOString(), id: info ? info.deviceId : '', mac: info ? info.mac : '', name: info ? info.name : '', mv: info ? info.mv : null,
+      before: before, after: info ? info.tx : null, ok: ok, note: err.slice(0, 120) });
+    save(KEY_LOG, log); drawLog();
+    setBusy(false);
+  }
+
+  async function reread() {
+    if (!svc || busy) return;
+    setBusy(true);
+    try { info = await readAll(); show(); status('Read again.', 'info'); } catch (e) { status('Could not read: ' + esc(e.message || e), 'bad'); }
+    setBusy(false);
+  }
+  function disconnect() { if (dev && dev.gatt && dev.gatt.connected) dev.gatt.disconnect(); svc = null; info = null; show(); setBusy(false); }
+
+  // ---- results ----
+  function resultsText() { return 'HSM-RADIO/1\n' + JSON.stringify(log); }
+  function drawLog() {
+    $('btnCopy').disabled = !log.length;
+    $('copyBox').value = log.length ? resultsText() : '';
+    if (!log.length) { $('log').innerHTML = '<p class="muted">No sensor set yet.</p>'; return; }
+    $('log').innerHTML = '<table><thead><tr><th>Time</th><th>Sensor</th><th>Battery</th><th>TX</th><th>Result</th></tr></thead><tbody>' + log.map(function (r) {
+      var d = new Date(r.t);
+      return '<tr><td>' + esc(d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) + '</td><td>' + esc(r.name) + '<div class="small muted">ID ' + esc(r.id) + '</div></td>' +
+        '<td>' + (r.mv == null ? '—' : esc((r.mv / 1000).toFixed(2) + ' V')) + '</td><td>' + esc((r.before == null ? '?' : r.before) + ' → ' + (r.after == null ? '?' : r.after)) + ' dBm</td>' +
+        '<td>' + (r.ok ? '<span class="tag ok">Confirmed</span>' : '<span class="tag bad">Not set</span>') + '</td></tr>';
+    }).join('') + '</tbody></table>';
+  }
+  async function copy() {
+    var text = resultsText();
+    try { await navigator.clipboard.writeText(text); status('Results copied. In the Heat Safety Monitor open Battery → Battery and radio maintenance and paste them.', 'ok'); }
+    catch (e) { $('copyBox').focus(); $('copyBox').select(); status('Copy was blocked: the text is selected in the box below; copy it by hand.', 'warn'); }
+  }
+  function hsmLink() {
+    var u = ($('hsmUrl').value || '').trim();
+    save(KEY_URL, u);
+    var a = $('lnkHsm');
+    if (/^https:\/\/script\.google\.com\//.test(u)) { a.href = u.split('?')[0] + '?view=battery'; a.removeAttribute('aria-disabled'); a.style.opacity = ''; }
+    else { a.href = '#'; a.setAttribute('aria-disabled', 'true'); a.style.opacity = '.45'; }
+  }
+
+  $('btnConnect').addEventListener('click', function () { connect(false); });
+  $('btnConnectAll').addEventListener('click', function () { connect(true); });
+  $('btnBlink').addEventListener('click', blink);
+  $('btnSet').addEventListener('click', setTx);
+  $('btnRead').addEventListener('click', reread);
+  $('btnDisc').addEventListener('click', disconnect);
+  $('btnCopy').addEventListener('click', copy);
+  $('btnClear').addEventListener('click', function () { if (!log.length) return; log = []; save(KEY_LOG, log); drawLog(); status('List cleared.', 'info'); });
+  $('hsmUrl').value = load(KEY_URL, '') || '';
+  $('hsmUrl').addEventListener('input', hsmLink);
+  $('lnkHsm').addEventListener('click', function (ev) { if ($('lnkHsm').getAttribute('href') === '#') { ev.preventDefault(); status('Paste the Heat Safety Monitor link of this plant in the box first.', 'warn'); } });
+  setBusy(false); checkSupport(); drawLog(); hsmLink(); show();
+})();
+</script>
+</body>
+</html>
