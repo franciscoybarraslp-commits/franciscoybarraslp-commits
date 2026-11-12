@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   SensorPush Radio Setup · Heat Safety Monitor companion page
-  Version 1.1 · 2026-11-12 · for Heat Safety Monitor 1.9.0 or later
+  Version 1.2 · 2026-11-12 · for Heat Safety Monitor 1.9.1 or later (1.9.0 works without the sensor list)
+  Changes 1.2: Find a sensor (warmer/colder signal meter with optional beep and vibration, list of nearby sensors sorted
+  by signal) where Chrome allows live signal (Chrome flag "Experimental Web Platform features"); otherwise Blink 127 times
+  and connection loss as the range check. Sensor list from HSM (pasted once, kept on the device): the page names the
+  sensor it holds or hears (number, place, grid, last seen, offline in HSM). Writes are still only TX power and LED blink.
   Changes 1.1: name filter box ("Sensor name starts with", saved on the device) so the Bluetooth list shows only matching
   sensors; the list no longer adds devices by service alone; "show every device" link marked as a long list.
   1.0: first version.
@@ -24,6 +28,7 @@
   :root { --dark: #253442; --text: #1E3446; --muted: #4E6B7C; --line: #D4DEE4; --bg: #F4F7F9; --surface: #FFFFFF;
     --cta: #82E600; --cta-ink: #1E3446; --ok: #1B6E3C; --ok-bg: #E3F4E8; --warn: #7A5200; --warn-bg: #FFF4D6; --bad: #A4161A; --bad-bg: #FCE8E8; --info: #1F4E79; --info-bg: #E6F0F8; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font-family: Montserrat, Arial, sans-serif; font-size: 16px; line-height: 1.5; }
   header { background: var(--dark); color: #FFFFFF; padding: 16px; }
   header .kicker { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; font-weight: 600; }
@@ -54,6 +59,17 @@
   .tag.ok { background: var(--ok-bg); color: var(--ok); } .tag.bad { background: var(--bad-bg); color: var(--bad); } .tag.warn { background: var(--warn-bg); color: var(--warn); }
   ol { padding-left: 20px; margin: 0; } li { margin: 4px 0; }
   .linkbtn { background: none; border: 0; padding: 0; color: var(--info); font: inherit; text-decoration: underline; cursor: pointer; min-height: 32px; }
+  details summary { cursor: pointer; min-height: 32px; }
+  label.check { display: inline-flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600; color: var(--text); margin: 0; min-height: 44px; }
+  label.check input { width: 22px; min-height: 22px; height: 22px; }
+  .meter { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 8px 0; }
+  .mrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0; }
+  .mrow b { font-size: 40px; line-height: 1.1; min-width: 150px; }
+  .bar { height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--dark); transition: width .3s; }
+  .tag.info { background: var(--info-bg); color: var(--info); }
+  .sigbar { display: inline-block; width: 64px; height: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; vertical-align: middle; }
+  .sigbar i { display: block; height: 100%; background: var(--dark); }
   @media (max-width: 480px) { table { font-size: 12px; } .btn { width: 100%; } }
 </style>
 </head>
@@ -71,8 +87,19 @@
       <li>Press <b>Set to +5 dBm</b>. The page writes it, reads it back and shows <b>Confirmed</b>.</li>
       <li>Press <b>Disconnect</b> and go to the next sensor. At the end, press <b>Copy results</b> and paste them in the Heat Safety Monitor (Battery tab).</li>
     </ol>
+    <p class="small muted">To look for a lost or loose sensor, use <b>Find a sensor</b> further down.</p>
     <div class="note info"><b>First sensor only: check that the setting stays.</b> After Confirmed, take the battery out for 10 seconds, put it back, connect again and look at "TX power now". If it went back to the old value, tell the HSE team before doing more sensors.</div>
     <p class="small muted">SensorPush: more power = more range, at the cost of battery life; they suggest +5 dBm for signal problems and say the battery still lasts over two years in typical use.</p>
+  </section>
+
+  <section class="card">
+    <details id="hsmListBox">
+      <summary><b>Sensor list from HSM</b> <span id="hsmListState" class="small muted">(optional) not loaded</span></summary>
+      <p class="small muted" style="margin-top: 8px;">In the Heat Safety Monitor open Battery → Battery and radio maintenance → <b>Copy sensor list</b>, then paste it here once. The page then shows which sensor it is holding or hearing, where it belongs and if HSM shows it offline. It stays on this device; paste a new list after sensors are added or renamed.</p>
+      <label for="hsmListText">Paste the sensor list (starts with HSM-SENSORS/1)</label>
+      <textarea id="hsmListText" rows="3" placeholder="HSM-SENSORS/1 …"></textarea>
+      <div class="row"><button type="button" class="btn" id="btnListSave">Save list</button><button type="button" class="linkbtn" id="btnListClear">Remove the list</button></div>
+    </details>
   </section>
 
   <section class="card">
@@ -94,8 +121,10 @@
         <div class="fact"><span>MAC address</span><b id="fMac" style="font-size: 16px;">—</b></div>
         <div class="fact"><span>Model</span><b id="fModel">—</b></div>
       </div>
+      <div id="fHsm" class="note info" hidden></div>
       <div class="row">
         <button type="button" class="btn" id="btnBlink">Blink LED</button>
+        <button type="button" class="btn" id="btnBlinkLong">Blink 127 times</button>
         <button type="button" class="btn btn-primary" id="btnSet">Set to +5 dBm</button>
         <button type="button" class="btn" id="btnRead">Read again</button>
         <button type="button" class="btn" id="btnDisc">Disconnect</button>
@@ -107,6 +136,30 @@
         <option value="1">+1 dBm</option><option value="0">0 dBm</option>
       </select>
     </div>
+  </section>
+
+  <section class="card" id="findCard">
+    <h2>Find a sensor</h2>
+    <p>Walk slowly with the phone. The signal number gets <b>closer to 0</b> (for example −80 → −55) as you get closer to the sensor. Turn around slowly too: your body blocks the signal.</p>
+    <div id="findMode"></div>
+    <div class="row">
+      <button type="button" class="btn btn-primary" id="btnScan">Scan nearby sensors</button>
+      <button type="button" class="btn" id="btnFind">Find one sensor</button>
+      <button type="button" class="btn" id="btnStop" disabled>Stop</button>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="optBeep"> Beep and vibrate (faster = closer)</label>
+    </div>
+    <div id="findStatus" class="note info" hidden></div>
+    <div id="meter" class="meter" hidden>
+      <div class="small muted" id="mName">—</div>
+      <div id="mHsm" class="small"></div>
+      <div class="mrow"><b id="mDbm">—</b><span id="mWord" class="tag">—</span><span id="mTrend" class="tag">—</span></div>
+      <div class="bar"><i id="mBar" style="width: 0%;"></i></div>
+      <div class="small muted" id="mHeard">—</div>
+    </div>
+    <div id="nearby"></div>
+    <p class="small muted">The words (very close, close, same area, far) are only a rough guide: walls, metal racks and people change the signal. Trust the trend: warmer = you are getting closer.</p>
   </section>
 
   <section class="card">
@@ -122,7 +175,7 @@
     <label for="copyBox">Results text (if Copy does not work, select it and copy by hand)</label>
     <textarea id="copyBox" readonly></textarea>
   </section>
-  <p class="small muted">SensorPush Radio Setup 1.1 · writes only TX power and LED blink · protocol: sensorpush.com/bluetooth-api</p>
+  <p class="small muted">SensorPush Radio Setup 1.2 · writes only TX power and LED blink · protocol: sensorpush.com/bluetooth-api</p>
 </main>
 <script>
 (function () {
@@ -131,7 +184,7 @@
   function C(n) { return 'ef09' + n + '-11d6-42ba-93b8-9dd7ec090aa9'; }
   var CH = { id: C('0001'), ver: C('0002'), tx: C('0003'), bat: C('0007'), led: C('000c'), mac: C('000d') };
   var ALLOWED = [0, 1, 2, 3, 4, 5];
-  var KEY_LOG = 'spRadioLog', KEY_URL = 'spRadioHsmUrl', KEY_NAME = 'spRadioName';
+  var KEY_LOG = 'spRadioLog', KEY_URL = 'spRadioHsmUrl', KEY_NAME = 'spRadioName', KEY_LIST = 'spRadioHsmList';
   function namePrefix() { var v = ($('nameFilter').value || '').trim(); return v || 'SensorPush'; }
   var dev = null, svc = null, info = null, busy = false, SUPPORTED = true;
   function $(id) { return document.getElementById(id); }
@@ -139,9 +192,46 @@
   function load(k, d) { try { var v = window.localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function save(k, v) { try { window.localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked: the list lives until the page closes */ } }
   var log = load(KEY_LOG, []);
+  var hsm = load(KEY_LIST, null);   // { site, at, sensors: [{ d, m, n, g, l, s, off }] } from HSM 1.9.1
+
+  // ---- sensor list from HSM (since 1.2) ----
+  function macKeys(m) { var p = String(m || '').toUpperCase().match(/[0-9A-F]{2}/g) || []; return p.length === 6 ? [p.join(''), p.slice().reverse().join('')] : []; }
+  function hsmById(id, mac) {
+    if (!hsm || !hsm.sensors) return null;
+    var keys = macKeys(mac);
+    for (var i = 0; i < hsm.sensors.length; i++) { var x = hsm.sensors[i]; if (id && x.d === String(id)) return x; }
+    for (var j = 0; j < hsm.sensors.length; j++) { var y = hsm.sensors[j]; if (macKeys(y.m).some(function (k) { return keys.indexOf(k) >= 0; })) return y; }
+    return null;
+  }
+  /** A Bluetooth name that ends in hex digits (for example "SensorPush HT.w 3A1F") is matched to the end of a MAC address, only if one sensor fits. */
+  function hsmByName(name) {
+    if (!hsm || !hsm.sensors) return null;
+    var t = String(name || '').toUpperCase().match(/([0-9A-F]{4,12})\s*$/);
+    if (!t) return null;
+    var hits = hsm.sensors.filter(function (x) { return macKeys(x.m).some(function (k) { return k.slice(-t[1].length) === t[1]; }); });
+    return hits.length === 1 ? hits[0] : null;
+  }
+  function hsmText(x) {
+    if (!x) return '';
+    return '<b>' + esc(x.n) + '</b>' + (x.g ? ' · grid ' + esc(x.g) : '') + (x.l && x.n.indexOf(x.l) < 0 ? ' · ' + esc(x.l) : '') +
+      ' · last seen ' + esc(x.s || '—') + (x.off ? ' <span class="tag bad">offline in HSM</span>' : ' <span class="tag ok">online in HSM</span>');
+  }
+  function drawListState() {
+    $('hsmListState').textContent = hsm && hsm.sensors ? '· ' + hsm.sensors.length + ' sensors' + (hsm.site ? ' · ' + hsm.site : '') + ' · copied ' + (hsm.at || '') : '(optional) not loaded';
+  }
+  function saveList() {
+    var t = ($('hsmListText').value || '').trim();
+    try {
+      if (t.indexOf('HSM-SENSORS/1') !== 0) throw new Error('x');
+      var obj = JSON.parse(t.slice('HSM-SENSORS/1'.length).trim());
+      if (!obj || !Array.isArray(obj.sensors)) throw new Error('x');
+      hsm = obj; save(KEY_LIST, hsm); $('hsmListText').value = ''; drawListState(); show();
+      status('Sensor list saved: ' + hsm.sensors.length + ' sensors.', 'ok');
+    } catch (e) { status('That is not the HSM sensor list. In HSM press Copy sensor list and paste the whole text (it starts with HSM-SENSORS/1).', 'bad'); }
+  }
 
   function status(text, kind) { var s = $('status'); s.hidden = !text; s.className = 'note ' + (kind || 'info'); s.innerHTML = text || ''; }
-  function setBusy(b) { busy = b; ['btnConnect', 'btnBlink', 'btnSet', 'btnRead', 'btnDisc'].forEach(function (id) { $(id).disabled = b || (id !== 'btnConnect' && !svc) || (id === 'btnConnect' && !SUPPORTED); }); }
+  function setBusy(b) { busy = b; ['btnConnect', 'btnBlink', 'btnBlinkLong', 'btnSet', 'btnRead', 'btnDisc'].forEach(function (id) { $(id).disabled = b || (id !== 'btnConnect' && !svc) || (id === 'btnConnect' && !SUPPORTED); }); }
 
   // ---- can this browser do it? ----
   function checkSupport() {
@@ -183,6 +273,9 @@
     $('fId').textContent = info.deviceId;
     $('fMac').textContent = info.mac || '—';
     $('fModel').textContent = info.model == null ? '—' : 'ID ' + info.model;
+    var hx = hsmById(info.deviceId, info.mac);
+    $('fHsm').hidden = !hsm;
+    $('fHsm').innerHTML = hx ? 'In HSM: ' + hsmText(hx) : 'This sensor is not in the HSM sensor list (other plant, new, or the list is old).';
   }
 
   async function connect(all) {
@@ -214,6 +307,14 @@
     if (!svc || busy) return;
     setBusy(true);
     try { await (await svc.getCharacteristic(CH.led)).writeValue(Uint8Array.of(5)); status('The sensor should blink 5 times now. If a different one blinks, press Disconnect and connect again.', 'info'); }
+    catch (e) { status('Could not blink the LED: ' + esc(e.message || e), 'warn'); }
+    setBusy(false);
+  }
+
+  async function blinkLong() {
+    if (!svc || busy) return;
+    setBusy(true);
+    try { await (await svc.getCharacteristic(CH.led)).writeValue(Uint8Array.of(127)); status('The sensor blinks 127 times now (about 2 minutes). Look under racks and behind equipment. If the page says Disconnected, you walked out of range: go back.', 'info'); }
     catch (e) { status('Could not blink the LED: ' + esc(e.message || e), 'warn'); }
     setBusy(false);
   }
@@ -250,6 +351,118 @@
   }
   function disconnect() { if (dev && dev.gatt && dev.gatt.connected) dev.gatt.disconnect(); svc = null; info = null; show(); setBusy(false); }
 
+  // ---- find a sensor (since 1.2) ----
+  // Live signal needs Chrome's "Experimental Web Platform features" flag: requestLEScan (list of nearby sensors) and/or
+  // BluetoothDevice.watchAdvertisements (one chosen sensor). Chrome decided in 2023 not to ship them by default.
+  function fstatus(text, kind) { var s = $('findStatus'); s.hidden = !text; s.className = 'note ' + (kind || 'info'); s.innerHTML = text || ''; }
+  var CAN_SCAN = !!(navigator.bluetooth && navigator.bluetooth.requestLEScan);
+  var CAN_WATCH = !!(window.BluetoothDevice && BluetoothDevice.prototype && 'watchAdvertisements' in BluetoothDevice.prototype);
+  var near = {}, target = null, scan = null, watchAbort = null, watchDev = null, timer = null, beepTimer = null, audio = null;
+  function findMode() {
+    var box = $('findMode');
+    if (!SUPPORTED) { box.innerHTML = ''; $('btnScan').disabled = $('btnFind').disabled = true; return; }
+    if (CAN_SCAN || CAN_WATCH) {
+      box.innerHTML = '<div class="note ok">Live signal is on in this browser.' + (CAN_SCAN ? ' <b>Scan nearby sensors</b> lists every sensor the phone hears, strongest first; tap Find on one.' : ' Use <b>Find one sensor</b> and pick it in the list.') + '</div>';
+      $('btnScan').disabled = !CAN_SCAN; $('btnFind').disabled = false;
+      if (!CAN_SCAN) { $('btnScan').hidden = true; $('btnFind').className = 'btn btn-primary'; }
+    } else {
+      box.innerHTML = '<div class="note warn"><b>Live signal is off in this Chrome</b> (Google keeps it behind a setting). To turn it on, on Android: open a new tab, type <b>chrome://flags</b>, search <b>Experimental Web Platform features</b>, set it to <b>Enabled</b> and press <b>Relaunch</b>. A work phone managed by IT may not allow it; ask IT first. ' +
+        'Without it: connect to the sensor in the Sensor card above and press <b>Blink 127 times</b>; if the page says Disconnected you walked out of range. The nRF Connect app also shows the live signal.</div>';
+      $('btnScan').disabled = $('btnFind').disabled = true;
+    }
+  }
+  function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }); var n = b.length; return n ? (n % 2 ? b[(n - 1) / 2] : (b[n / 2 - 1] + b[n / 2]) / 2) : null; }
+  function smooth(e, now) { var r = e.s.filter(function (x) { return now - x[0] <= 4000; }).map(function (x) { return x[1]; }); return r.length ? Math.round(median(r)) : null; }
+  function past(e, now) { var r = e.s.filter(function (x) { return now - x[0] > 4000 && now - x[0] <= 9000; }).map(function (x) { return x[1]; }); return r.length ? median(r) : null; }
+  function word(v) { return v === null ? ['No signal', 'bad'] : v >= -55 ? ['Very close', 'ok'] : v >= -67 ? ['Close', 'ok'] : v >= -80 ? ['Same area', 'warn'] : ['Far', 'bad']; }
+  function pct(v) { return v === null ? 0 : Math.max(0, Math.min(100, Math.round((v + 100) / 60 * 100))); }
+  function onAdv(ev) {
+    var d = ev.device || {}, id = d.id || 'x', rssi = ev.rssi;
+    if (typeof rssi !== 'number' || rssi >= 0 || rssi < -127) return;
+    var e = near[id] || (near[id] = { id: id, name: d.name || ev.name || '(no name)', s: [], dev: d });
+    if (!e.name || e.name === '(no name)') e.name = d.name || ev.name || e.name;
+    var now = Date.now(); e.s.push([now, rssi]); e.last = now;
+    while (e.s.length && now - e.s[0][0] > 15000) e.s.shift();
+  }
+  function drawFind() {
+    var now = Date.now(), list = Object.keys(near).map(function (k) { var e = near[k]; return { e: e, v: now - e.last > 10000 ? null : smooth(e, now) }; });
+    list.sort(function (a, b) { return (b.v === null ? -999 : b.v) - (a.v === null ? -999 : a.v); });
+    if (scan) {
+      $('nearby').innerHTML = !list.length ? '<p class="muted">Listening… no sensor heard yet. Check the name box in the Sensor card.</p>' :
+        '<table><thead><tr><th>Sensor</th><th>Signal</th><th></th></tr></thead><tbody>' + list.slice(0, 60).map(function (x) {
+          var hx = hsmByName(x.e.name);
+          return '<tr><td>' + esc(x.e.name) + (hx ? '<div class="small">' + hsmText(hx) + '</div>' : '') + '</td><td>' + (x.v === null ? '<span class="muted">not heard</span>' : x.v + ' dBm <span class="sigbar"><i style="width: ' + pct(x.v) + '%"></i></span>') + '</td>' +
+            '<td><button type="button" class="linkbtn" data-find="' + esc(x.e.id) + '">' + (target === x.e.id ? 'Finding' : 'Find') + '</button></td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    var t = target && near[target];
+    $('meter').hidden = !target;
+    if (!target) return;
+    $('mName').textContent = t ? t.name : (watchDev && watchDev.name) || 'Sensor';
+    var hx = t ? hsmByName(t.name) : null;
+    $('mHsm').innerHTML = hx ? hsmText(hx) : '';
+    var v = t && now - t.last <= 10000 ? smooth(t, now) : null, w = word(v), pv = t ? past(t, now) : null;
+    $('mDbm').textContent = v === null ? '—' : v + ' dBm';
+    $('mWord').textContent = w[0]; $('mWord').className = 'tag ' + w[1];
+    var tr = v === null || pv === null ? ['…', 'info'] : v - pv >= 3 ? ['Warmer ↑', 'ok'] : pv - v >= 3 ? ['Colder ↓', 'bad'] : ['Same', 'info'];
+    $('mTrend').textContent = tr[0]; $('mTrend').className = 'tag ' + tr[1];
+    $('mBar').style.width = pct(v) + '%';
+    $('mHeard').textContent = !t || !t.last ? 'Waiting for the first signal…' : 'Last heard ' + Math.round((now - t.last) / 1000) + ' s ago' + (now - t.last > 10000 ? ': out of range or blocked. Go back to where it was stronger.' : '');
+  }
+  function beepLoop() {
+    clearTimeout(beepTimer);
+    if (!target) return;
+    var t = near[target], now = Date.now(), v = t && now - t.last <= 10000 ? smooth(t, now) : null;
+    if ($('optBeep').checked && v !== null) {
+      try {
+        audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+        var o = audio.createOscillator(), g = audio.createGain();
+        o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.04);
+      } catch (e) { /* no sound on this device */ }
+      if (navigator.vibrate) navigator.vibrate(30);
+    }
+    var gap = v === null ? 1500 : Math.max(150, Math.min(1500, Math.round(1500 - (pct(v) / 100) * 1350)));
+    beepTimer = setTimeout(beepLoop, gap);
+  }
+  function startTimers() { if (!timer) timer = setInterval(drawFind, 1000); beepLoop(); $('btnStop').disabled = false; }
+  async function startScan() {
+    if (scan) return;
+    try {
+      scan = await navigator.bluetooth.requestLEScan({ filters: [{ namePrefix: namePrefix() }], keepRepeatedDevices: true });
+      navigator.bluetooth.addEventListener('advertisementreceived', onAdv);
+      fstatus('Scanning. Walk slowly; the list updates every second.', 'info');
+      startTimers(); drawFind();
+    } catch (e) { scan = null; fstatus('Could not start the scan: ' + esc(e && e.message || e), 'bad'); }
+  }
+  async function findOne() {
+    try {
+      var d = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: namePrefix() }], optionalServices: [SVC] });
+      target = d.id;
+      near[d.id] = near[d.id] || { id: d.id, name: d.name || 'Sensor', s: [], dev: d };
+      if (CAN_SCAN) { await startScan(); }
+      else {
+        if (watchAbort) watchAbort.abort();
+        watchAbort = new AbortController(); watchDev = d;
+        d.addEventListener('advertisementreceived', onAdv);
+        await d.watchAdvertisements({ signal: watchAbort.signal });
+      }
+      fstatus('Finding <b>' + esc(d.name || 'the sensor') + '</b>. Walk slowly and watch Warmer / Colder.', 'info');
+      startTimers(); drawFind();
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') fstatus('No sensor chosen.', 'warn');
+      else fstatus('Could not follow this sensor: ' + esc(e && e.message || e), 'bad');
+    }
+  }
+  function stopFind() {
+    try { if (scan) scan.stop(); } catch (e) {}
+    if (scan) navigator.bluetooth.removeEventListener('advertisementreceived', onAdv);
+    scan = null;
+    if (watchAbort) { watchAbort.abort(); watchAbort = null; }
+    if (watchDev) { watchDev.removeEventListener('advertisementreceived', onAdv); watchDev = null; }
+    clearInterval(timer); timer = null; clearTimeout(beepTimer); target = null;
+    $('btnStop').disabled = true; $('meter').hidden = true; fstatus('Stopped.', 'info');
+  }
+
   // ---- results ----
   function resultsText() { return 'HSM-RADIO/1\n' + JSON.stringify(log); }
   function drawLog() {
@@ -279,6 +492,13 @@
   $('btnConnect').addEventListener('click', function () { connect(false); });
   $('btnConnectAll').addEventListener('click', function () { connect(true); });
   $('btnBlink').addEventListener('click', blink);
+  $('btnBlinkLong').addEventListener('click', blinkLong);
+  $('btnScan').addEventListener('click', startScan);
+  $('btnFind').addEventListener('click', findOne);
+  $('btnStop').addEventListener('click', stopFind);
+  $('nearby').addEventListener('click', function (ev) { var b = ev.target.closest('[data-find]'); if (!b) return; target = b.getAttribute('data-find'); drawFind(); beepLoop(); });
+  $('btnListSave').addEventListener('click', saveList);
+  $('btnListClear').addEventListener('click', function () { hsm = null; save(KEY_LIST, null); drawListState(); show(); status('Sensor list removed from this device.', 'info'); });
   $('btnSet').addEventListener('click', setTx);
   $('btnRead').addEventListener('click', reread);
   $('btnDisc').addEventListener('click', disconnect);
@@ -289,7 +509,7 @@
   $('nameFilter').addEventListener('input', function () { save(KEY_NAME, ($('nameFilter').value || '').trim()); });
   $('hsmUrl').addEventListener('input', hsmLink);
   $('lnkHsm').addEventListener('click', function (ev) { if ($('lnkHsm').getAttribute('href') === '#') { ev.preventDefault(); status('Paste the Heat Safety Monitor link of this plant in the box first.', 'warn'); } });
-  setBusy(false); checkSupport(); drawLog(); hsmLink(); show();
+  setBusy(false); checkSupport(); findMode(); drawListState(); drawLog(); hsmLink(); show();
 })();
 </script>
 </body>
